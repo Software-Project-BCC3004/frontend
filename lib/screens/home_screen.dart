@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:frontend/screens/logout_screen.dart';
 import 'package:frontend/screens/patient_screen.dart';
+import 'package:frontend/screens/pews_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,6 +15,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<Widget> _screens = [
     const PatientScreen(),
+    const PewsScreen(),
     const LogoutScreen(),
   ];
 
@@ -34,6 +36,10 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(
             icon: Icon(Icons.people),
             label: 'Pacientes',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.medical_services),
+            label: 'PEWS',
           ),
           NavigationDestination(
             icon: Icon(Icons.account_circle),

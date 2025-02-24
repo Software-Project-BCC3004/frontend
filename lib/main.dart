@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/pews_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,9 +17,10 @@ class MyApp extends StatelessWidget {
       title: 'App Médico',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.lightBlue,
-          primary: Colors.lightBlue[900]!,
-          secondary: Colors.lightBlue[700]!,
+          seedColor: const Color(0xFF2196F3),
+          primary: const Color(0xFF1976D2),
+          secondary: const Color(0xFF64B5F6),
+          tertiary: const Color(0xFF4CAF50),
         ),
         useMaterial3: true,
       ),
@@ -26,6 +28,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/login': (context) => const LoginScreen(),
         '/home': (context) => const HomeScreen(),
+        '/pews': (context) => const PewsScreen(),
       },
     );
   }
