@@ -38,6 +38,31 @@ class LogoutScreen extends StatelessWidget {
               const Spacer(),
               Container(
                 width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pushNamed(context, '/professional');
+                  },
+                  icon: const Icon(Icons.medical_services, color: Colors.white),
+                  label: const Text(
+                    'Gerenciar Equipe Médica',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1976D2),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 20),
                 child: ElevatedButton.icon(
                   onPressed: () {
