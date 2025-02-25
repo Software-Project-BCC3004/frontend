@@ -4,9 +4,18 @@ import 'screens/home_screen.dart';
 import 'screens/pews_screen.dart';
 import 'screens/professional_screen.dart';
 import 'screens/monitoring_screen.dart';
+import 'package:provider/provider.dart';
+import 'providers/auth_provider.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {

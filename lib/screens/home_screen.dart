@@ -18,7 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const PatientScreen(),
     const PewsScreen(),
     const MonitoringScreen(),
-    const LogoutScreen(),
+    LogoutScreen(),
   ];
 
   void _onItemTapped(int index) {
