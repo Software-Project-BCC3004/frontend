@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:frontend/screens/logout_screen.dart';
 import 'package:frontend/screens/patient_screen.dart';
 import 'package:frontend/screens/pews_screen.dart';
+import 'package:frontend/screens/professional_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
