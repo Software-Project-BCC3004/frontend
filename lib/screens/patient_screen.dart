@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:frontend/services/patient_service.dart';
+import 'dart:async';
 
 class PatientScreen extends StatefulWidget {
+  static void refreshInstance(BuildContext context) {
+    final state = context.findAncestorStateOfType<_PatientScreenState>();
+    if (state != null) {
+      state._loadPatients();
+    }
+  }
+
   const PatientScreen({super.key});
 
   @override
@@ -57,7 +66,47 @@ class Patient {
   }
 }
 
-class _PatientScreenState extends State<PatientScreen> {
+// Classe para formatar CPF automaticamente
+class CpfInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    var text = newValue.text;
+
+    if (text.isEmpty) {
+      return newValue;
+    }
+
+    // Remove caracteres não numéricos
+    text = text.replaceAll(RegExp(r'[^\d]'), '');
+
+    // Limita a 11 dígitos
+    if (text.length > 11) {
+      text = text.substring(0, 11);
+    }
+
+    var formattedText = '';
+    for (var i = 0; i < text.length; i++) {
+      // Adiciona ponto após o 3º e 6º dígito
+      if (i == 3 || i == 6) {
+        formattedText += '.';
+      }
+      // Adiciona hífen após o 9º dígito
+      else if (i == 9) {
+        formattedText += '-';
+      }
+      formattedText += text[i];
+    }
+
+    return TextEditingValue(
+      text: formattedText,
+      selection: TextSelection.collapsed(offset: formattedText.length),
+    );
+  }
+}
+
+class _PatientScreenState extends State<PatientScreen>
+    with AutomaticKeepAliveClientMixin {
   final List<Patient> patients = [];
   final nameController = TextEditingController();
   final cpfController = TextEditingController();
@@ -68,13 +117,31 @@ class _PatientScreenState extends State<PatientScreen> {
   String selectedSeverity = 'Baixo';
   bool isLoading = true;
   String? errorMessage;
+  StreamSubscription? _patientUpdateSubscription;
+
+  // Mensagens de erro para validação
+  String? nameError;
+  String? cpfError;
+  String? diagnosisError;
+  String? bedError;
+  String? responsibleNameError;
+  String? responsibleCpfError;
 
   final PatientService _patientService = PatientService();
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     _loadPatients();
+
+    _patientUpdateSubscription = PatientService.patientUpdateStream.listen((_) {
+      if (mounted) {
+        _loadPatients();
+      }
+    });
   }
 
   @override
@@ -86,6 +153,7 @@ class _PatientScreenState extends State<PatientScreen> {
     bedController.dispose();
     responsibleNameController.dispose();
     responsibleCpfController.dispose();
+    _patientUpdateSubscription?.cancel();
     super.dispose();
   }
 
@@ -154,22 +222,75 @@ class _PatientScreenState extends State<PatientScreen> {
     }
   }
 
-  String _formatCpf(String cpf) {
-    // Remover caracteres não numéricos
-    cpf = cpf.replaceAll(RegExp(r'[^\d]'), '');
+  // Validar todos os campos do formulário
+  bool _validateForm() {
+    bool isValid = true;
 
-    // Limitar a 11 dígitos
-    if (cpf.length > 11) cpf = cpf.substring(0, 11);
-
-    // Formatar o CPF
-    if (cpf.length > 9) {
-      return '${cpf.substring(0, 3)}.${cpf.substring(3, 6)}.${cpf.substring(6, 9)}-${cpf.substring(9)}';
-    } else if (cpf.length > 6) {
-      return '${cpf.substring(0, 3)}.${cpf.substring(3, 6)}.${cpf.substring(6)}';
-    } else if (cpf.length > 3) {
-      return '${cpf.substring(0, 3)}.${cpf.substring(3)}';
+    // Validar nome
+    if (nameController.text.isEmpty) {
+      nameError = 'Nome é obrigatório';
+      isValid = false;
+    } else {
+      nameError = null;
     }
-    return cpf;
+
+    // Validar CPF
+    final cpfText = cpfController.text.replaceAll(RegExp(r'[^\d]'), '');
+    if (cpfText.isEmpty) {
+      cpfError = 'CPF é obrigatório';
+      isValid = false;
+    } else if (cpfText.length != 11) {
+      cpfError = 'CPF deve ter 11 dígitos';
+      isValid = false;
+    } else {
+      cpfError = null;
+    }
+
+    // Validar diagnóstico
+    if (diagnosisController.text.isEmpty) {
+      diagnosisError = 'Diagnóstico é obrigatório';
+      isValid = false;
+    } else {
+      diagnosisError = null;
+    }
+
+    // Validar leito
+    if (bedController.text.isEmpty) {
+      bedError = 'Leito é obrigatório';
+      isValid = false;
+    } else if (!_validateBedFormat(bedController.text)) {
+      bedError = 'Formato inválido (use A + 2 números, ex: A01)';
+      isValid = false;
+    } else {
+      bedError = null;
+    }
+
+    // Validar nome do responsável
+    if (responsibleNameController.text.isEmpty) {
+      responsibleNameError = 'Nome do responsável é obrigatório';
+      isValid = false;
+    } else {
+      responsibleNameError = null;
+    }
+
+    // Validar CPF do responsável
+    final responsibleCpfText =
+        responsibleCpfController.text.replaceAll(RegExp(r'[^\d]'), '');
+    if (responsibleCpfText.isEmpty) {
+      responsibleCpfError = 'CPF do responsável é obrigatório';
+      isValid = false;
+    } else if (responsibleCpfText.length != 11) {
+      responsibleCpfError = 'CPF deve ter 11 dígitos';
+      isValid = false;
+    } else if (cpfText == responsibleCpfText) {
+      responsibleCpfError =
+          'CPF do responsável não pode ser igual ao do paciente';
+      isValid = false;
+    } else {
+      responsibleCpfError = null;
+    }
+
+    return isValid;
   }
 
   bool _validateBedFormat(String bed) {
@@ -190,7 +311,71 @@ class _PatientScreenState extends State<PatientScreen> {
     return cleanPatientCpf != cleanResponsibleCpf;
   }
 
+  // Método para mostrar detalhes do paciente
+  void _showPatientDetails(Patient patient) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(patient.name),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _detailRow('CPF', patient.cpf),
+              _detailRow('Diagnóstico', patient.diagnosis),
+              _detailRow('Leito', patient.bed),
+              _detailRow('Severidade', patient.severity),
+              const Divider(),
+              _detailRow('Responsável', patient.responsibleName),
+              _detailRow('CPF do Responsável', patient.responsibleCpf),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Widget para exibir uma linha de detalhes
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.blue,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+
   void _showAddEditPatientDialog([Patient? patient, int? index]) {
+    // Limpar mensagens de erro
+    nameError = null;
+    cpfError = null;
+    diagnosisError = null;
+    bedError = null;
+    responsibleNameError = null;
+    responsibleCpfError = null;
+
     if (patient != null) {
       nameController.text = patient.name;
       cpfController.text = patient.cpf;
@@ -211,260 +396,292 @@ class _PatientScreenState extends State<PatientScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(patient != null ? 'Editar Paciente' : 'Novo Paciente'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nome',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: cpfController,
-                decoration: const InputDecoration(
-                  labelText: 'CPF',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) {
-                  final formattedCpf = _formatCpf(value);
-                  if (formattedCpf != value) {
-                    cpfController.value = TextEditingValue(
-                      text: formattedCpf,
-                      selection:
-                          TextSelection.collapsed(offset: formattedCpf.length),
-                    );
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: diagnosisController,
-                decoration: const InputDecoration(
-                  labelText: 'Diagnóstico',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: bedController,
-                decoration: const InputDecoration(
-                  labelText: 'Leito (formato: A + 2 números, ex: A01)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: responsibleNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nome do Responsável',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: responsibleCpfController,
-                decoration: const InputDecoration(
-                  labelText: 'CPF do Responsável',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) {
-                  final formattedCpf = _formatCpf(value);
-                  if (formattedCpf != value) {
-                    responsibleCpfController.value = TextEditingValue(
-                      text: formattedCpf,
-                      selection:
-                          TextSelection.collapsed(offset: formattedCpf.length),
-                    );
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                decoration: const InputDecoration(
-                  labelText: 'Grau de Severidade',
-                  border: OutlineInputBorder(),
-                ),
-                value: selectedSeverity,
-                items: const [
-                  DropdownMenuItem(value: 'Baixo', child: Text('Baixo')),
-                  DropdownMenuItem(value: 'Moderado', child: Text('Moderado')),
-                  DropdownMenuItem(value: 'Alto', child: Text('Alto')),
-                  DropdownMenuItem(value: 'Crítico', child: Text('Crítico')),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text(patient != null ? 'Editar Paciente' : 'Novo Paciente'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Nome',
+                      border: const OutlineInputBorder(),
+                      errorText: nameError,
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        if (value.isEmpty) {
+                          nameError = 'Nome é obrigatório';
+                        } else {
+                          nameError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: cpfController,
+                    decoration: InputDecoration(
+                      labelText: 'CPF',
+                      border: const OutlineInputBorder(),
+                      errorText: cpfError,
+                      helperText: 'Formato: 000.000.000-00',
+                    ),
+                    inputFormatters: [
+                      CpfInputFormatter(),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        final cpfText = value.replaceAll(RegExp(r'[^\d]'), '');
+                        if (cpfText.isEmpty) {
+                          cpfError = 'CPF é obrigatório';
+                        } else if (cpfText.length != 11) {
+                          cpfError = 'CPF deve ter 11 dígitos';
+                        } else {
+                          cpfError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: diagnosisController,
+                    decoration: InputDecoration(
+                      labelText: 'Diagnóstico',
+                      border: const OutlineInputBorder(),
+                      errorText: diagnosisError,
+                    ),
+                    maxLines: 3,
+                    onChanged: (value) {
+                      setState(() {
+                        if (value.isEmpty) {
+                          diagnosisError = 'Diagnóstico é obrigatório';
+                        } else {
+                          diagnosisError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: bedController,
+                    decoration: InputDecoration(
+                      labelText: 'Leito',
+                      border: const OutlineInputBorder(),
+                      helperText: 'Formato: A + 2 números (ex: A01)',
+                      errorText: bedError,
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        if (value.isEmpty) {
+                          bedError = 'Leito é obrigatório';
+                        } else if (!_validateBedFormat(value)) {
+                          bedError =
+                              'Formato inválido (use A + 2 números, ex: A01)';
+                        } else {
+                          bedError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: responsibleNameController,
+                    decoration: InputDecoration(
+                      labelText: 'Nome do Responsável',
+                      border: const OutlineInputBorder(),
+                      errorText: responsibleNameError,
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        if (value.isEmpty) {
+                          responsibleNameError =
+                              'Nome do responsável é obrigatório';
+                        } else {
+                          responsibleNameError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: responsibleCpfController,
+                    decoration: InputDecoration(
+                      labelText: 'CPF do Responsável',
+                      border: const OutlineInputBorder(),
+                      errorText: responsibleCpfError,
+                      helperText: 'Formato: 000.000.000-00',
+                    ),
+                    inputFormatters: [
+                      CpfInputFormatter(),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        final responsibleCpfText =
+                            value.replaceAll(RegExp(r'[^\d]'), '');
+                        final patientCpfText =
+                            cpfController.text.replaceAll(RegExp(r'[^\d]'), '');
+
+                        if (responsibleCpfText.isEmpty) {
+                          responsibleCpfError =
+                              'CPF do responsável é obrigatório';
+                        } else if (responsibleCpfText.length != 11) {
+                          responsibleCpfError = 'CPF deve ter 11 dígitos';
+                        } else if (patientCpfText == responsibleCpfText) {
+                          responsibleCpfError =
+                              'CPF do responsável não pode ser igual ao do paciente';
+                        } else {
+                          responsibleCpfError = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(
+                      labelText: 'Grau de Severidade',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: selectedSeverity,
+                    items: const [
+                      DropdownMenuItem(value: 'Baixo', child: Text('Baixo')),
+                      DropdownMenuItem(
+                          value: 'Moderado', child: Text('Moderado')),
+                      DropdownMenuItem(value: 'Alto', child: Text('Alto')),
+                      DropdownMenuItem(
+                          value: 'Crítico', child: Text('Crítico')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          selectedSeverity = value;
+                        });
+                      }
+                    },
+                  ),
                 ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      selectedSeverity = value;
-                    });
-                  }
-                },
               ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              // Validar campos vazios
-              if (nameController.text.isEmpty ||
-                  cpfController.text.isEmpty ||
-                  diagnosisController.text.isEmpty ||
-                  bedController.text.isEmpty ||
-                  responsibleNameController.text.isEmpty ||
-                  responsibleCpfController.text.isEmpty) {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Campos Obrigatórios'),
-                    content: const Text(
-                        'Por favor, preencha todos os campos antes de salvar.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-                return;
-              }
-
-              // Validar formato do leito
-              if (!_validateBedFormat(bedController.text)) {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Formato de Leito Inválido'),
-                    content: const Text(
-                        'O leito deve seguir o formato A + 2 números (ex: A01, A02, A10).'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-                return;
-              }
-
-              // Validar CPFs diferentes
-              if (!_validateCpfsDifferent(
-                  cpfController.text, responsibleCpfController.text)) {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('CPFs Iguais ou Inválidos'),
-                    content: const Text(
-                        'O CPF do paciente não pode ser igual ao CPF do responsável e ambos devem ser válidos.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-                return;
-              }
-
-              final newPatient = Patient(
-                id: patient?.id,
-                name: nameController.text,
-                cpf: cpfController.text,
-                diagnosis: diagnosisController.text,
-                bed: bedController.text,
-                severity: selectedSeverity,
-                responsibleName: responsibleNameController.text,
-                responsibleCpf: responsibleCpfController.text,
-              );
-
-              try {
-                if (patient != null && index != null) {
-                  // Atualizar paciente existente
-                  if (patient.id != null) {
-                    // Criar o JSON diretamente
-                    final Map<String, dynamic> apiData =
-                        newPatient.toApiModel();
-
-                    print('Enviando para atualização: $apiData');
-                    await _patientService.updatePatient(patient.id!, apiData);
-                  }
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  // Validar todos os campos
                   setState(() {
-                    patients[index] = newPatient;
+                    _validateForm();
                   });
-                } else {
-                  // Criar novo paciente
-                  final Map<String, dynamic> apiData = newPatient.toApiModel();
 
-                  print('Enviando para criação: $apiData');
+                  // Verificar se há erros
+                  if (nameError != null ||
+                      cpfError != null ||
+                      diagnosisError != null ||
+                      bedError != null ||
+                      responsibleNameError != null ||
+                      responsibleCpfError != null) {
+                    return; // Não prosseguir se houver erros
+                  }
+
+                  final newPatient = Patient(
+                    id: patient?.id,
+                    name: nameController.text,
+                    cpf: cpfController.text,
+                    diagnosis: diagnosisController.text,
+                    bed: bedController.text,
+                    severity: selectedSeverity,
+                    responsibleName: responsibleNameController.text,
+                    responsibleCpf: responsibleCpfController.text,
+                  );
 
                   try {
-                    final createdPatient =
-                        await _patientService.createPatient(apiData);
+                    if (patient != null && index != null) {
+                      // Atualizar paciente existente
+                      if (patient.id != null) {
+                        // Criar o JSON diretamente
+                        final Map<String, dynamic> apiData =
+                            newPatient.toApiModel();
 
-                    // Converter a resposta para Map<String, dynamic>
-                    final Map<String, dynamic> patientMap = {
-                      'id': createdPatient['id'],
-                      'nomePaciente':
-                          createdPatient['nomePaciente'] ?? newPatient.name,
-                      'cpfPaciente':
-                          createdPatient['cpfPaciente'] ?? newPatient.cpf,
-                      'diagnostico':
-                          createdPatient['diagnostico'] ?? newPatient.diagnosis,
-                      'leito': createdPatient['leito'] ?? newPatient.bed,
-                      'grauSeveridade': createdPatient['grauSeveridade'] ??
-                          newPatient.severity,
-                      'nomeResponsavel': createdPatient['nomeResponsavel'] ??
-                          newPatient.responsibleName,
-                      'cpfResponsavel': createdPatient['cpfResponsavel'] ??
-                          newPatient.responsibleCpf,
-                    };
+                        print('Enviando para atualização: $apiData');
+                        await _patientService.updatePatient(
+                            patient.id!, apiData);
+                      }
+                      setState(() {
+                        patients[index] = newPatient;
+                      });
+                    } else {
+                      // Criar novo paciente
+                      final Map<String, dynamic> apiData =
+                          newPatient.toApiModel();
 
-                    setState(() {
-                      patients.add(Patient.fromApiModel(patientMap));
-                    });
+                      print('Enviando para criação: $apiData');
+
+                      try {
+                        final createdPatient =
+                            await _patientService.createPatient(apiData);
+
+                        // Converter a resposta para Map<String, dynamic>
+                        final Map<String, dynamic> patientMap = {
+                          'id': createdPatient['id'],
+                          'nomePaciente':
+                              createdPatient['nomePaciente'] ?? newPatient.name,
+                          'cpfPaciente':
+                              createdPatient['cpfPaciente'] ?? newPatient.cpf,
+                          'diagnostico': createdPatient['diagnostico'] ??
+                              newPatient.diagnosis,
+                          'leito': createdPatient['leito'] ?? newPatient.bed,
+                          'grauSeveridade': createdPatient['grauSeveridade'] ??
+                              newPatient.severity,
+                          'nomeResponsavel':
+                              createdPatient['nomeResponsavel'] ??
+                                  newPatient.responsibleName,
+                          'cpfResponsavel': createdPatient['cpfResponsavel'] ??
+                              newPatient.responsibleCpf,
+                        };
+
+                        setState(() {
+                          patients.add(Patient.fromApiModel(patientMap));
+                        });
+                      } catch (e) {
+                        print('Erro ao criar paciente: $e');
+                        throw Exception('Falha ao criar paciente: $e');
+                      }
+                    }
+
+                    Navigator.pop(context);
+
+                    // Notificar que houve uma atualização
+                    _patientService.notifyPatientUpdate();
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(patient != null
+                            ? 'Paciente atualizado com sucesso!'
+                            : 'Paciente cadastrado com sucesso!'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
                   } catch (e) {
-                    print('Erro ao criar paciente: $e');
-                    throw Exception('Falha ao criar paciente: $e');
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Erro: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
                   }
-                }
-
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(patient != null
-                        ? 'Paciente atualizado com sucesso!'
-                        : 'Paciente cadastrado com sucesso!'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Salvar'),
-          ),
-        ],
+                },
+                child: const Text('Salvar'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -493,6 +710,10 @@ class _PatientScreenState extends State<PatientScreen> {
                     setState(() {
                       patients.removeAt(index);
                     });
+
+                    // Notificar que houve uma atualização
+                    _patientService.notifyPatientUpdate();
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Paciente excluído com sucesso!'),
@@ -534,6 +755,8 @@ class _PatientScreenState extends State<PatientScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pacientes'),
@@ -541,10 +764,6 @@ class _PatientScreenState extends State<PatientScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadPatients,
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showAddEditPatientDialog(),
           ),
         ],
       ),
@@ -577,12 +796,6 @@ class _PatientScreenState extends State<PatientScreen> {
                             'Nenhum paciente cadastrado',
                             style: TextStyle(fontSize: 18),
                           ),
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            onPressed: () => _showAddEditPatientDialog(),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Adicionar Paciente'),
-                          ),
                         ],
                       ),
                     )
@@ -592,35 +805,123 @@ class _PatientScreenState extends State<PatientScreen> {
                         final patient = patients[index];
                         return Card(
                           margin: const EdgeInsets.all(8.0),
-                          child: ListTile(
-                            title: Text(patient.name),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Leito: ${patient.bed}'),
-                                Text('Severidade: ${patient.severity}'),
-                                Text('Responsável: ${patient.responsibleName}'),
-                              ],
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit),
-                                  onPressed: () =>
-                                      _showAddEditPatientDialog(patient, index),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete,
-                                      color: Colors.red),
-                                  onPressed: () => _deletePatient(index),
-                                ),
-                              ],
+                          child: InkWell(
+                            onTap: () => _showPatientDetails(patient),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              patient.name,
+                                              style: const TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'CPF: ${patient.cpf}',
+                                              style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _getSeverityColor(
+                                              patient.severity),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          patient.severity,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const Divider(),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text('Leito: ${patient.bed}'),
+                                            Text(
+                                              'Responsável: ${patient.responsibleName}',
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.edit),
+                                            onPressed: () =>
+                                                _showAddEditPatientDialog(
+                                                    patient, index),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete,
+                                                color: Colors.red),
+                                            onPressed: () =>
+                                                _deletePatient(index),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );
                       },
                     ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddEditPatientDialog(),
+        child: const Icon(Icons.add),
+      ),
     );
+  }
+
+  // Método para obter a cor com base na severidade
+  Color _getSeverityColor(String severity) {
+    switch (severity) {
+      case 'Baixo':
+        return Colors.green;
+      case 'Moderado':
+        return Colors.orange;
+      case 'Alto':
+        return Colors.deepOrange;
+      case 'Crítico':
+        return Colors.red;
+      default:
+        return Colors.blue;
+    }
   }
 }

@@ -30,6 +30,17 @@ class _PewsScreenState extends State<PewsScreen> {
   void initState() {
     super.initState();
     _loadPatients();
+
+    // Adicionar listener para atualizar a lista de pacientes quando a tela receber foco
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final focusNode = FocusNode();
+      FocusScope.of(context).requestFocus(focusNode);
+      focusNode.addListener(() {
+        if (focusNode.hasFocus) {
+          _loadPatients();
+        }
+      });
+    });
   }
 
   Future<void> _loadPatients() async {
@@ -219,6 +230,9 @@ class _PewsScreenState extends State<PewsScreen> {
         nebulizacao = false;
         pontuacaoTotal = 0;
       });
+
+      // Recarregar a lista de pacientes após salvar
+      _loadPatients();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

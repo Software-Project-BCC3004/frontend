@@ -125,16 +125,25 @@ class PewsService {
     }
   }
 
-  Future<void> deletePewsEvaluation(dynamic id) async {
-    final response = await http.delete(
-      Uri.parse('$baseUrl/avaliacao/pews/deletar/$id'),
-    );
+  Future<bool> deletePewsEvaluation(int id) async {
+    try {
+      // Usar a URL correta para deletar
+      final response = await http.delete(
+        Uri.parse('$baseUrl/avaliacao/pews/deletar/$id'),
+        headers: {'Content-Type': 'application/json'},
+      );
 
-    if (response.statusCode == 200) {
-      notifyPewsUpdate();
-    } else {
-      throw Exception(
-          'Falha ao deletar avaliação PEWS: ${response.statusCode} - ${response.body}');
+      // Considerar 204 (No Content) como sucesso
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        // Notificar sobre a exclusão
+        notifyPewsUpdate();
+        return true;
+      } else {
+        throw Exception(
+            'Falha ao excluir avaliação PEWS: ${response.statusCode} - ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Erro ao excluir avaliação PEWS: $e');
     }
   }
 }

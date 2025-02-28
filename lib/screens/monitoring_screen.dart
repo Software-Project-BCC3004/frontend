@@ -521,13 +521,14 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                 try {
                   final id = pews['id'];
                   if (id != null) {
-                    await _pewsService.deletePewsEvaluation(id);
+                    // Chamar o método de exclusão e considerar 204 como sucesso
+                    final success = await _pewsService.deletePewsEvaluation(id);
 
-                    setState(() {
-                      pewsList.remove(pews);
-                    });
-
+                    // Se chegou aqui, a operação foi bem-sucedida
                     Navigator.of(context).pop();
+
+                    // Atualizar a lista após a exclusão
+                    _loadData();
 
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
