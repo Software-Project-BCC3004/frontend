@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 
 class Patient {
   final int? id;
@@ -50,6 +51,17 @@ class Patient {
 
 class PatientService {
   static const String baseUrl = 'http://localhost:8080/pacientes';
+
+  // Adicionar um StreamController para notificar sobre atualizações
+  static final StreamController<void> _patientUpdateController =
+      StreamController<void>.broadcast();
+  static Stream<void> get patientUpdateStream =>
+      _patientUpdateController.stream;
+
+  // Método para notificar sobre atualizações
+  void notifyPatientUpdate() {
+    _patientUpdateController.add(null);
+  }
 
   // Método para converter do modelo UI para o modelo API
   Patient convertToApiPatient(Map<String, dynamic> data) {
@@ -156,6 +168,8 @@ class PatientService {
       print('Resposta: ${response.statusCode} - ${response.body}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        // Notificar sobre a criação
+        notifyPatientUpdate();
         return json.decode(response.body) as Map<String, dynamic>;
       } else {
         throw Exception(
@@ -183,6 +197,8 @@ class PatientService {
       print('Resposta: ${response.statusCode} - ${response.body}');
 
       if (response.statusCode == 200) {
+        // Notificar sobre a atualização
+        notifyPatientUpdate();
         return json.decode(response.body) as Map<String, dynamic>;
       } else {
         throw Exception(
@@ -199,6 +215,9 @@ class PatientService {
       final response = await http.delete(
         Uri.parse('$baseUrl/deletar/$id'),
       );
+
+      // Notificar sobre a exclusão
+      notifyPatientUpdate();
 
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
