@@ -9,10 +9,8 @@ import 'providers/auth_provider.dart';
 
 void main() {
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-      ],
+    ChangeNotifierProvider(
+      create: (context) => AuthProvider(),
       child: const MyApp(),
     ),
   );
@@ -42,6 +40,16 @@ class MyApp extends StatelessWidget {
         '/pews': (context) => const PewsScreen(),
         '/professional': (context) => const ProfessionalScreen(),
         '/monitoring': (context) => const MonitoringScreen(),
+      },
+      onUnknownRoute: (settings) {
+        return MaterialPageRoute(
+          builder: (context) => Scaffold(
+            appBar: AppBar(title: const Text('Página não encontrada')),
+            body: const Center(
+              child: Text('A página solicitada não existe.'),
+            ),
+          ),
+        );
       },
     );
   }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import 'package:provider/provider.dart';
+import 'package:frontend/providers/auth_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isAdmin = true; // Toggle entre admin e profissional
   final _authService = AuthService();
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -24,43 +27,43 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
 
-      try {
-        final token = _isAdmin
-            ? await _authService.loginAsAdmin(
-                _emailController.text,
-                _senhaController.text,
-              )
-            : await _authService.loginAsProfissional(
-                _emailController.text,
-                _senhaController.text,
-              );
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-        setState(() => _isLoading = false);
+    try {
+      final token = await _authService.login(
+        _emailController.text,
+        _senhaController.text,
+        _isAdmin, // Passando o valor do switch para determinar a rota
+      );
 
-        if (token != null) {
-          // Salvar o token (você pode usar shared_preferences aqui)
-          Navigator.pushReplacementNamed(
-              context, '/home'); // Ajuste conforme sua rota
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Erro no login. Verifique suas credenciais.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+      if (token != null) {
+        // Atualizar o estado do AuthProvider
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        // Definir o tipo de usuário no AuthProvider
+        authProvider.login(isAdmin: _isAdmin);
+
+        // Navegar para a tela inicial
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
         }
-      } catch (e) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      } else {
+        setState(() {
+          _errorMessage = 'Credenciais inválidas. Tente novamente.';
+          _isLoading = false;
+        });
       }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Erro ao fazer login: $e';
+        _isLoading = false;
+      });
     }
   }
 
@@ -147,6 +150,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           return null;
                         },
                       ),
+                      if (_errorMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16.0),
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                       const SizedBox(height: 30),
                       _isLoading
                           ? const CircularProgressIndicator()
@@ -196,6 +211,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    Text(
+                      _isAdmin ? 'Admin' : 'Profissional',
+                      style: TextStyle(
+                        color: Colors.lightBlue[900],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Icon(
                       _isAdmin
                           ? Icons.admin_panel_settings

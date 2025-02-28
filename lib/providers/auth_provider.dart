@@ -1,22 +1,24 @@
 import 'package:flutter/foundation.dart';
 
 class AuthProvider extends ChangeNotifier {
-  String? _token;
+  bool _isLoggedIn = false;
   bool _isAdmin = false;
+  String? _token;
 
-  String? get token => _token;
+  bool get isLoggedIn => _isLoggedIn;
   bool get isAdmin => _isAdmin;
-  bool get isAuthenticated => _token != null;
+  String? get token => _token;
 
-  void setAuth(String token, bool isAdmin) {
-    _token = token;
+  void login({bool isAdmin = false}) {
+    _isLoggedIn = true;
     _isAdmin = isAdmin;
     notifyListeners();
   }
 
   void logout() {
-    _token = null;
+    _isLoggedIn = false;
     _isAdmin = false;
+    _token = null;
     notifyListeners();
   }
 }
