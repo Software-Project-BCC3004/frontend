@@ -26,6 +26,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
   String? errorMessage;
   Map<String, String> patientNames = {};
   StreamSubscription? _pewsUpdateSubscription;
+  Timer? _updateTimer;
 
   final PewsService _pewsService = PewsService();
   final PatientService _patientService = PatientService();
@@ -109,12 +110,22 @@ class _MonitoringScreenState extends State<MonitoringScreen>
         _loadData();
       }
     });
+
+    // Iniciar um timer para atualizar os cronômetros a cada segundo
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          // Apenas atualiza o estado para recalcular os tempos restantes
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     // Cancelar a inscrição para evitar vazamentos de memória
     _pewsUpdateSubscription?.cancel();
+    _updateTimer?.cancel();
     super.dispose();
   }
 
@@ -132,7 +143,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
       print('Avaliações PEWS carregadas: ${evaluations.length}');
       for (var eval in evaluations) {
         print(
-            'ID: ${eval.id}, Paciente: ${eval.idPaciente}, Pontuação: ${eval.pontuacaoTotal}');
+            'ID: ${eval.id}, Paciente: ${eval.idPaciente}, Pontuação: ${eval.pontuacaoTotal}, Data: ${eval.data_pews}');
       }
 
       // Carregar informações dos pacientes
@@ -144,22 +155,32 @@ class _MonitoringScreenState extends State<MonitoringScreen>
           bool emeseValue = pews.emese == 'EmeseSIM';
           bool nebulizacaoValue = pews.nebulizacao == 'NebulisacaoSIM';
 
-          // Calcular o timer baseado na pontuação
-          Duration timer;
+          // Calcular o intervalo baseado na pontuação
+          Duration interval;
           if (pews.pontuacaoTotal >= 7) {
-            timer = const Duration(seconds: 0); // Monitorização contínua
+            interval = const Duration(minutes: 0); // Monitorização contínua
           } else if (pews.pontuacaoTotal >= 4) {
-            timer = const Duration(minutes: 60); // 1h/1h
+            interval = const Duration(minutes: 60); // 1h/1h
           } else if (pews.pontuacaoTotal >= 3) {
-            timer = const Duration(minutes: 120); // 2h/2h
+            interval = const Duration(minutes: 120); // 2h/2h
           } else if (pews.pontuacaoTotal >= 1) {
-            timer = const Duration(minutes: 240); // 4h/4h
+            interval = const Duration(minutes: 240); // 4h/4h
           } else {
-            timer = const Duration(minutes: 360); // 6h/6h
+            interval = const Duration(minutes: 360); // 6h/6h
+          }
+
+          // Calcular o tempo restante com base na data de criação e no intervalo
+          DateTime dataPews = pews.data_pews;
+          DateTime proximaAvaliacao = dataPews.add(interval);
+          Duration tempoRestante = proximaAvaliacao.difference(DateTime.now());
+
+          // Se o tempo já passou, definir como zero
+          if (tempoRestante.isNegative) {
+            tempoRestante = Duration.zero;
           }
 
           return {
-            'id': pews.id ?? 0, // Garantir que id não seja nulo
+            'id': pews.id ?? 0,
             'paciente': patientNames[pews.idPaciente.toString()] ??
                 'Paciente ${pews.idPaciente}',
             'idPaciente': pews.idPaciente,
@@ -169,7 +190,10 @@ class _MonitoringScreenState extends State<MonitoringScreen>
             'avaliacaoRespiratoria': pews.avaliacao_respiratoria,
             'emese': emeseValue,
             'nebulizacao': nebulizacaoValue,
-            'timer': timer,
+            'dataPews': dataPews,
+            'proximaAvaliacao': proximaAvaliacao,
+            'tempoRestante': tempoRestante,
+            'intervalo': interval,
           };
         }).toList();
 
@@ -593,14 +617,49 @@ class _MonitoringScreenState extends State<MonitoringScreen>
     return '${seconds}s';
   }
 
+  // Método para calcular o tempo restante para cada avaliação
+  Duration calcularTempoRestante(DateTime dataPews, Duration intervalo) {
+    if (intervalo.inMinutes == 0) {
+      return Duration.zero; // Monitorização contínua
+    }
+
+    DateTime proximaAvaliacao = dataPews.add(intervalo);
+    Duration tempoRestante = proximaAvaliacao.difference(DateTime.now());
+
+    // Se o tempo já passou, definir como zero
+    if (tempoRestante.isNegative) {
+      return Duration.zero;
+    }
+
+    return tempoRestante;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Necessário chamar super.build quando usar AutomaticKeepAliveClientMixin
     super.build(context);
 
-    // Ordenar a lista por pontuação (maior para menor)
+    // Atualizar os tempos restantes para cada avaliação
+    for (var pews in pewsList) {
+      if (pews['intervalo'].inMinutes > 0) {
+        pews['tempoRestante'] = calcularTempoRestante(
+          pews['dataPews'],
+          pews['intervalo'],
+        );
+      }
+    }
+
+    // Ordenar a lista por pontuação (maior para menor) e depois por tempo restante (menor para maior)
     final sortedPewsList = List<Map<String, dynamic>>.from(pewsList)
-      ..sort((a, b) => b['pontuacao'].compareTo(a['pontuacao']));
+      ..sort((a, b) {
+        // Primeiro ordenar por pontuação (maior para menor)
+        int scoreComparison = b['pontuacao'].compareTo(a['pontuacao']);
+        if (scoreComparison != 0) return scoreComparison;
+
+        // Se a pontuação for igual, ordenar por tempo restante (menor para maior)
+        return (a['tempoRestante'] as Duration)
+            .compareTo(b['tempoRestante'] as Duration);
+      });
 
     return Scaffold(
       appBar: AppBar(
@@ -669,10 +728,26 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                       itemBuilder: (context, index) {
                         final pews = sortedPewsList[index];
                         final score = pews['pontuacao'] as int;
-                        final timer = pews['timer'] as Duration;
+                        final tempoRestante = pews['tempoRestante'] as Duration;
+                        final bool precisaAtualizar =
+                            tempoRestante.inSeconds == 0 &&
+                                pews['intervalo'].inMinutes > 0;
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 16.0),
+                          // Adicionar borda vermelha pulsante se precisar atualizar
+                          shape: precisaAtualizar
+                              ? RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  side: BorderSide(
+                                    color: Colors.red.withOpacity(
+                                        (DateTime.now().millisecondsSinceEpoch %
+                                                1000) /
+                                            1000),
+                                    width: 3,
+                                  ),
+                                )
+                              : null,
                           child: Column(
                             children: [
                               ListTile(
@@ -709,26 +784,68 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
                                           children: [
-                                            Text(
-                                              'Intervalo: ${getMonitoringInterval(score)}',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 13,
-                                              ),
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  'Intervalo: ${getMonitoringInterval(score)}',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  'Criado em: ${DateFormat('dd/MM/yyyy HH:mm').format(pews['dataPews'])}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                             const SizedBox(height: 4),
-                                            if (timer.inSeconds == 0)
+                                            if (pews['intervalo'].inMinutes ==
+                                                0)
                                               Container(
                                                 width: constraints.maxWidth,
                                                 alignment:
                                                     Alignment.centerRight,
-                                                child: Text(
-                                                  formatTimer(timer),
+                                                child: const Text(
+                                                  'Monitorização contínua',
                                                   style: TextStyle(
-                                                    color: getScoreColor(score),
+                                                    color: Colors.red,
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 13,
                                                   ),
+                                                ),
+                                              )
+                                            else if (precisaAtualizar)
+                                              Container(
+                                                width: constraints.maxWidth,
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.warning,
+                                                      color: Colors.red,
+                                                      size: 16,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      'ATUALIZAÇÃO NECESSÁRIA!',
+                                                      style: TextStyle(
+                                                        color: Colors.red,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               )
                                             else
@@ -737,7 +854,7 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                                                 alignment:
                                                     Alignment.centerRight,
                                                 child: Text(
-                                                  'Próxima avaliação em: ${formatTimer(timer)}',
+                                                  'Próxima avaliação em: ${formatTimer(tempoRestante)}',
                                                   style: TextStyle(
                                                     color: getScoreColor(score),
                                                     fontWeight: FontWeight.bold,
@@ -773,7 +890,17 @@ class _MonitoringScreenState extends State<MonitoringScreen>
                                           onPressed: () {
                                             _showEditDialog(pews);
                                           },
-                                          child: const Text('Atualizar'),
+                                          child: Text(
+                                            'Atualizar',
+                                            style: TextStyle(
+                                              color: precisaAtualizar
+                                                  ? Colors.red
+                                                  : null,
+                                              fontWeight: precisaAtualizar
+                                                  ? FontWeight.bold
+                                                  : null,
+                                            ),
+                                          ),
                                         ),
                                         const SizedBox(width: 8),
                                         TextButton(
