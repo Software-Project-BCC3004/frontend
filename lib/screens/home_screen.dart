@@ -22,9 +22,19 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   void _onItemTapped(int index) {
+    if (_selectedIndex == index) {
+      if (index == 1) {
+        MonitoringScreen.refreshInstance(context);
+      }
+    }
+
     setState(() {
       _selectedIndex = index;
     });
+
+    if (index == 1) {
+      MonitoringScreen.refreshInstance(context);
+    }
   }
 
   @override
