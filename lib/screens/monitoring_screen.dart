@@ -1,47 +1,38 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:frontend/services/pews_service.dart';
+import 'package:frontend/services/patient_service.dart';
+import 'package:intl/intl.dart';
 
 class MonitoringScreen extends StatefulWidget {
+  // Adicionando um método estático para facilitar a atualização de qualquer instância
+  static void refreshInstance(BuildContext context) {
+    final state = context.findAncestorStateOfType<_MonitoringScreenState>();
+    if (state != null) {
+      state._loadData();
+    }
+  }
+
   const MonitoringScreen({super.key});
 
   @override
   State<MonitoringScreen> createState() => _MonitoringScreenState();
 }
 
-class _MonitoringScreenState extends State<MonitoringScreen> {
-  // Dados mockados para visualização
-  final List<Map<String, dynamic>> pewsList = [
-    {
-      'paciente': 'João Silva',
-      'pontuacao': 8,
-      'avaliacaoNeurologica': 'AN3',
-      'avaliacaoCardiovascular': 'AC1',
-      'avaliacaoRespiratoria': 'AR3',
-      'emese': true,
-      'nebulizacao': true,
-      'timer': const Duration(seconds: 0), // Monitorização contínua
-    },
-    {
-      'paciente': 'Maria Santos',
-      'pontuacao': 4,
-      'avaliacaoNeurologica': 'AN1',
-      'avaliacaoCardiovascular': 'AC0',
-      'avaliacaoRespiratoria': 'AR2',
-      'emese': true,
-      'nebulizacao': false,
-      'timer': const Duration(minutes: 60), // 1h/1h
-    },
-    {
-      'paciente': 'Pedro Oliveira',
-      'pontuacao': 2,
-      'avaliacaoNeurologica': 'AN0',
-      'avaliacaoCardiovascular': 'AC0',
-      'avaliacaoRespiratoria': 'AR1',
-      'emese': false,
-      'nebulizacao': false,
-      'timer': const Duration(minutes: 240), // 4h/4h
-    },
-  ];
+class _MonitoringScreenState extends State<MonitoringScreen>
+    with AutomaticKeepAliveClientMixin {
+  List<Map<String, dynamic>> pewsList = [];
+  bool isLoading = true;
+  String? errorMessage;
+  Map<String, String> patientNames = {};
+  StreamSubscription? _pewsUpdateSubscription;
+
+  final PewsService _pewsService = PewsService();
+  final PatientService _patientService = PatientService();
+
+  // Implementando o mixin AutomaticKeepAliveClientMixin
+  @override
+  bool get wantKeepAlive => true;
 
   // Mapeamentos das avaliações
   final Map<String, Map<String, String>> avaliacoesNeurologicas = {
@@ -107,53 +98,139 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
     },
   };
 
-  Timer? _timer;
-
   @override
   void initState() {
     super.initState();
-    // Iniciar os timers
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _loadData();
+
+    // Inscrever-se para receber atualizações quando novos PEWS forem criados
+    _pewsUpdateSubscription = PewsService.pewsUpdateStream.listen((_) {
       if (mounted) {
-        setState(() {
-          for (var pews in pewsList) {
-            var duration = pews['timer'] as Duration;
-            if (duration.inSeconds > 0) {
-              pews['timer'] = duration - const Duration(seconds: 1);
-            }
-          }
-        });
+        _loadData();
       }
     });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    // Cancelar a inscrição para evitar vazamentos de memória
+    _pewsUpdateSubscription?.cancel();
     super.dispose();
   }
 
+  Future<void> _loadData() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    try {
+      // Carregar todas as avaliações PEWS
+      final evaluations = await _pewsService.getAllPewsEvaluations();
+
+      // Log para depuração
+      print('Avaliações PEWS carregadas: ${evaluations.length}');
+      for (var eval in evaluations) {
+        print(
+            'ID: ${eval.id}, Paciente: ${eval.idPaciente}, Pontuação: ${eval.pontuacaoTotal}');
+      }
+
+      // Carregar informações dos pacientes
+      await _loadPatientNames();
+
+      setState(() {
+        pewsList = evaluations.map((pews) {
+          // Verificar se emese e nebulização são strings ou booleanos
+          bool emeseValue = pews.emese == 'EmeseSIM';
+          bool nebulizacaoValue = pews.nebulizacao == 'NebulisacaoSIM';
+
+          // Calcular o timer baseado na pontuação
+          Duration timer;
+          if (pews.pontuacaoTotal >= 7) {
+            timer = const Duration(seconds: 0); // Monitorização contínua
+          } else if (pews.pontuacaoTotal >= 4) {
+            timer = const Duration(minutes: 60); // 1h/1h
+          } else if (pews.pontuacaoTotal >= 3) {
+            timer = const Duration(minutes: 120); // 2h/2h
+          } else if (pews.pontuacaoTotal >= 1) {
+            timer = const Duration(minutes: 240); // 4h/4h
+          } else {
+            timer = const Duration(minutes: 360); // 6h/6h
+          }
+
+          return {
+            'id': pews.id ?? 0, // Garantir que id não seja nulo
+            'paciente': patientNames[pews.idPaciente.toString()] ??
+                'Paciente ${pews.idPaciente}',
+            'idPaciente': pews.idPaciente,
+            'pontuacao': pews.pontuacaoTotal,
+            'avaliacaoNeurologica': pews.avaliacao_neurologica,
+            'avaliacaoCardiovascular': pews.avaliacao_cardiovascular,
+            'avaliacaoRespiratoria': pews.avaliacao_respiratoria,
+            'emese': emeseValue,
+            'nebulizacao': nebulizacaoValue,
+            'timer': timer,
+          };
+        }).toList();
+
+        isLoading = false;
+      });
+    } catch (e) {
+      print('Erro ao carregar avaliações PEWS: $e');
+      setState(() {
+        errorMessage = 'Erro ao carregar dados: $e';
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadPatientNames() async {
+    try {
+      final apiPatients = await _patientService.getAllPatients();
+      patientNames = {
+        for (var patient in apiPatients)
+          (patient.id?.toString() ?? ''): patient.nomePaciente,
+      };
+    } catch (e) {
+      print('Erro ao carregar nomes dos pacientes: $e');
+      // Não falhar completamente se não conseguir carregar os nomes
+    }
+  }
+
   void _showEditDialog(Map<String, dynamic> pews) {
-    String? avaliacaoNeurologica = pews['avaliacaoNeurologica'];
-    String? avaliacaoCardiovascular = pews['avaliacaoCardiovascular'];
-    String? avaliacaoRespiratoria = pews['avaliacaoRespiratoria'];
-    bool emese = pews['emese'];
-    bool nebulizacao = pews['nebulizacao'];
-    int pontuacaoTotal = 0;
+    // Garantir que os valores não sejam nulos
+    String avaliacaoNeurologica = pews['avaliacaoNeurologica'] ?? 'AN0';
+    String avaliacaoCardiovascular = pews['avaliacaoCardiovascular'] ?? 'AC0';
+    String avaliacaoRespiratoria = pews['avaliacaoRespiratoria'] ?? 'AR0';
+    bool emese = pews['emese'] ?? false;
+    bool nebulizacao = pews['nebulizacao'] ?? false;
+    int pontuacaoTotal = pews['pontuacao'] ?? 0;
 
     void calcularPontuacao() {
       int pontos = 0;
 
-      if (avaliacaoNeurologica != null) {
-        pontos += int.parse(avaliacaoNeurologica!.substring(2));
+      if (avaliacaoNeurologica.length > 2) {
+        try {
+          pontos += int.parse(avaliacaoNeurologica.substring(2));
+        } catch (e) {
+          print('Erro ao converter valor neurológico: $e');
+        }
       }
 
-      if (avaliacaoCardiovascular != null) {
-        pontos += int.parse(avaliacaoCardiovascular!.substring(2));
+      if (avaliacaoCardiovascular.length > 2) {
+        try {
+          pontos += int.parse(avaliacaoCardiovascular.substring(2));
+        } catch (e) {
+          print('Erro ao converter valor cardiovascular: $e');
+        }
       }
 
-      if (avaliacaoRespiratoria != null) {
-        pontos += int.parse(avaliacaoRespiratoria!.substring(2));
+      if (avaliacaoRespiratoria.length > 2) {
+        try {
+          pontos += int.parse(avaliacaoRespiratoria.substring(2));
+        } catch (e) {
+          print('Erro ao converter valor respiratório: $e');
+        }
       }
 
       if (emese) pontos += 2;
@@ -161,6 +238,9 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
 
       pontuacaoTotal = pontos;
     }
+
+    // Calcular a pontuação inicial
+    calcularPontuacao();
 
     Widget buildSelectedItem(String titulo) {
       return Text(
@@ -221,7 +301,7 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
                       }).toList(),
                       onChanged: (String? newValue) {
                         setState(() {
-                          avaliacaoNeurologica = newValue;
+                          avaliacaoNeurologica = newValue!;
                           calcularPontuacao();
                         });
                       },
@@ -256,7 +336,7 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
                       }).toList(),
                       onChanged: (String? newValue) {
                         setState(() {
-                          avaliacaoCardiovascular = newValue;
+                          avaliacaoCardiovascular = newValue!;
                           calcularPontuacao();
                         });
                       },
@@ -291,7 +371,7 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
                       }).toList(),
                       onChanged: (String? newValue) {
                         setState(() {
-                          avaliacaoRespiratoria = newValue;
+                          avaliacaoRespiratoria = newValue!;
                           calcularPontuacao();
                         });
                       },
@@ -364,30 +444,52 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
                   child: const Text('Cancelar'),
                 ),
                 ElevatedButton(
-                  onPressed: () {
-                    // Atualizar os dados do PEWS
-                    this.setState(() {
-                      pews['avaliacaoNeurologica'] = avaliacaoNeurologica;
-                      pews['avaliacaoCardiovascular'] = avaliacaoCardiovascular;
-                      pews['avaliacaoRespiratoria'] = avaliacaoRespiratoria;
-                      pews['emese'] = emese;
-                      pews['nebulizacao'] = nebulizacao;
-                      pews['pontuacao'] = pontuacaoTotal;
-
-                      // Resetar o timer baseado na nova pontuação
-                      if (pontuacaoTotal >= 7) {
-                        pews['timer'] = const Duration(seconds: 0);
-                      } else if (pontuacaoTotal >= 4) {
-                        pews['timer'] = const Duration(minutes: 60);
-                      } else if (pontuacaoTotal >= 3) {
-                        pews['timer'] = const Duration(minutes: 120);
-                      } else if (pontuacaoTotal >= 1) {
-                        pews['timer'] = const Duration(minutes: 240);
-                      } else {
-                        pews['timer'] = const Duration(minutes: 360);
+                  onPressed: () async {
+                    try {
+                      // Garantir que o ID não seja nulo
+                      final id = pews['id'];
+                      if (id == null) {
+                        throw Exception('ID da avaliação não encontrado');
                       }
-                    });
-                    Navigator.of(context).pop();
+
+                      // Atualizar os dados do PEWS
+                      final updatedPews = PewsEvaluation(
+                        id: id,
+                        avaliacao_neurologica: avaliacaoNeurologica,
+                        avaliacao_cardiovascular: avaliacaoCardiovascular,
+                        avaliacao_respiratoria: avaliacaoRespiratoria,
+                        emese: emese ? 'EmeseSIM' : 'EmeseNAO',
+                        nebulizacao:
+                            nebulizacao ? 'NebulisacaoSIM' : 'NebulisacaoNAO',
+                        idPaciente: pews['idPaciente'] ?? '',
+                        pontuacaoTotal: pontuacaoTotal,
+                        data_pews: DateTime.now(),
+                      );
+
+                      await _pewsService.updatePewsEvaluation(id, updatedPews);
+
+                      // Recarregar os dados após a atualização
+                      _loadData();
+
+                      Navigator.of(context).pop();
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content:
+                              Text('Avaliação PEWS atualizada com sucesso!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    } catch (e) {
+                      Navigator.of(context).pop();
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Erro ao atualizar avaliação: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
                   },
                   child: const Text('Salvar'),
                 ),
@@ -415,11 +517,37 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
               child: const Text('Cancelar'),
             ),
             TextButton(
-              onPressed: () {
-                setState(() {
-                  pewsList.remove(pews);
-                });
-                Navigator.of(context).pop();
+              onPressed: () async {
+                try {
+                  final id = pews['id'];
+                  if (id != null) {
+                    await _pewsService.deletePewsEvaluation(id);
+
+                    setState(() {
+                      pewsList.remove(pews);
+                    });
+
+                    Navigator.of(context).pop();
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Paciente recebeu alta com sucesso!'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  } else {
+                    throw Exception('ID da avaliação não encontrado');
+                  }
+                } catch (e) {
+                  Navigator.of(context).pop();
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erro ao dar alta: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               },
               style: TextButton.styleFrom(
                 foregroundColor: Colors.red,
@@ -466,6 +594,9 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Necessário chamar super.build quando usar AutomaticKeepAliveClientMixin
+    super.build(context);
+
     // Ordenar a lista por pontuação (maior para menor)
     final sortedPewsList = List<Map<String, dynamic>>.from(pewsList)
       ..sort((a, b) => b['pontuacao'].compareTo(a['pontuacao']));
@@ -473,166 +604,196 @@ class _MonitoringScreenState extends State<MonitoringScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Monitoramento PEWS'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+            tooltip: 'Atualizar lista',
+          ),
+        ],
       ),
-      body: sortedPewsList.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.favorite,
-                    color: Colors.green,
-                    size: 64,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'SEM PACIENTES EM OBSERVAÇÃO!',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                  ),
-                  const Text(
-                    'VIVA A SAÚDE! :D',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16.0),
-              itemCount: sortedPewsList.length,
-              itemBuilder: (context, index) {
-                final pews = sortedPewsList[index];
-                final score = pews['pontuacao'] as int;
-                final timer = pews['timer'] as Duration;
-
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 16.0),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : errorMessage != null
+              ? Center(
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      ListTile(
-                        title: Text(
-                          pews['paciente'],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                        trailing: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: getScoreColor(score),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            'PEWS: $score',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
+                      Text(
+                        errorMessage!,
+                        style: const TextStyle(color: Colors.red),
+                        textAlign: TextAlign.center,
                       ),
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Intervalo: ${getMonitoringInterval(score)}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    if (timer.inSeconds == 0)
-                                      Container(
-                                        width: constraints.maxWidth,
-                                        alignment: Alignment.centerRight,
-                                        child: Text(
-                                          formatTimer(timer),
-                                          style: TextStyle(
-                                            color: getScoreColor(score),
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      Container(
-                                        width: constraints.maxWidth,
-                                        alignment: Alignment.centerRight,
-                                        child: Text(
-                                          'Próxima avaliação em: ${formatTimer(timer)}',
-                                          style: TextStyle(
-                                            color: getScoreColor(score),
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Neurológico: ${avaliacoesNeurologicas[pews['avaliacaoNeurologica']]?['titulo'] ?? ''}',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            Text(
-                              'Cardiovascular: ${avaliacoesCardiovasculares[pews['avaliacaoCardiovascular']]?['titulo'] ?? ''}',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            Text(
-                              'Respiratório: ${avaliacoesRespiratorias[pews['avaliacaoRespiratoria']]?['titulo'] ?? ''}',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            if (pews['emese']) const Text('• Emese'),
-                            if (pews['nebulizacao'])
-                              const Text('• Nebulização'),
-                            const SizedBox(height: 16),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton(
-                                  onPressed: () {
-                                    _showEditDialog(pews);
-                                  },
-                                  child: const Text('Atualizar'),
-                                ),
-                                const SizedBox(width: 8),
-                                TextButton(
-                                  onPressed: () {
-                                    _showDeleteDialog(pews);
-                                  },
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: Colors.red,
-                                  ),
-                                  child: const Text('Dar Alta'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _loadData,
+                        child: const Text('Tentar Novamente'),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
+                )
+              : sortedPewsList.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.favorite,
+                            color: Colors.green,
+                            size: 64,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'SEM PACIENTES EM OBSERVAÇÃO!',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const Text(
+                            'VIVA A SAÚDE! :D',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16.0),
+                      itemCount: sortedPewsList.length,
+                      itemBuilder: (context, index) {
+                        final pews = sortedPewsList[index];
+                        final score = pews['pontuacao'] as int;
+                        final timer = pews['timer'] as Duration;
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 16.0),
+                          child: Column(
+                            children: [
+                              ListTile(
+                                title: Text(
+                                  pews['paciente'],
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: getScoreColor(score),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'PEWS: $score',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        return Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Intervalo: ${getMonitoringInterval(score)}',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            if (timer.inSeconds == 0)
+                                              Container(
+                                                width: constraints.maxWidth,
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Text(
+                                                  formatTimer(timer),
+                                                  style: TextStyle(
+                                                    color: getScoreColor(score),
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              )
+                                            else
+                                              Container(
+                                                width: constraints.maxWidth,
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Text(
+                                                  'Próxima avaliação em: ${formatTimer(timer)}',
+                                                  style: TextStyle(
+                                                    color: getScoreColor(score),
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Neurológico: ${avaliacoesNeurologicas[pews['avaliacaoNeurologica']]?['titulo'] ?? ''}',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                    Text(
+                                      'Cardiovascular: ${avaliacoesCardiovasculares[pews['avaliacaoCardiovascular']]?['titulo'] ?? ''}',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                    Text(
+                                      'Respiratório: ${avaliacoesRespiratorias[pews['avaliacaoRespiratoria']]?['titulo'] ?? ''}',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                    if (pews['emese']) const Text('• Emese'),
+                                    if (pews['nebulizacao'])
+                                      const Text('• Nebulização'),
+                                    const SizedBox(height: 16),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () {
+                                            _showEditDialog(pews);
+                                          },
+                                          child: const Text('Atualizar'),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        TextButton(
+                                          onPressed: () {
+                                            _showDeleteDialog(pews);
+                                          },
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.red,
+                                          ),
+                                          child: const Text('Dar Alta'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }
