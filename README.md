@@ -50,3 +50,7 @@ Antes de executar o frontend, é necessário configurar e iniciar o backend:
 
 - Se ocorrerem erros de CORS, verifique se o frontend está sendo executado com a flag `--disable-web-security`
 - Para problemas de conexão com o backend, verifique se o servidor está em execução e acessível
+
+
+
+Vai Corinthians
