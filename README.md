@@ -1,5 +1,7 @@
 # Frontend PEWS - Sistema de Monitoramento Pediátrico
 
+![Uploading PEWS_2025.gif…]()
+
 ## Pré-requisitos
 
 - Flutter SDK instalado e configurado
