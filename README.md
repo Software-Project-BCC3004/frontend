@@ -2,6 +2,22 @@
 
 ![Image](https://github.com/user-attachments/assets/16a95927-8e40-41ae-943b-6eaa28372053)
 
+## Descrição
+Desenvolvido para a disciplina de Engenharia de Software (BCC3004), este projeto implementa um sistema de monitoramento pediátrico baseado no score PEWS (Pediatric Early Warning Score).
+
+## Tecnologias Utilizadas
+- **Flutter/Dart**: Framework para desenvolvimento multiplataforma
+- **Spring Boot**: Backend em Java  
+- **MySQL**: Banco de dados relacional
+
+## Funcionalidades
+- ✅ Autenticação de usuários (Administrador e Profissionais de Saúde)
+- 👥 Gerenciamento de equipe médica
+- 🏥 Cadastro e monitoramento de pacientes
+- 📊 Avaliação PEWS com cálculo automático de score
+- ⚡ Monitoramento em tempo real com alertas visuais
+- 📋 Histórico de avaliações por paciente
+
 ## Pré-requisitos
 
 - Flutter SDK instalado e configurado
