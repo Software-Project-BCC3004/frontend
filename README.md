@@ -1,6 +1,6 @@
 # Frontend PEWS - Sistema de Monitoramento Pediátrico
 
-![Uploading PEWS_2025.gif…]()
+![Image](https://github.com/user-attachments/assets/16a95927-8e40-41ae-943b-6eaa28372053)
 
 ## Pré-requisitos
 
